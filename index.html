@@ -180,6 +180,33 @@ dialog label .field{display:block;width:100%;margin-top:4px;font-weight:400}
 .thumb .rm{position:absolute;top:4px;right:4px;width:26px;height:26px;border-radius:999px;border:0;background:rgba(0,0,0,.65);color:#fff;cursor:pointer;font-size:.8rem}
 .tray-actions{display:flex;gap:8px;margin-top:10px}
 .tray-actions .btn{flex:1}
+.sug{background:var(--low-soft);border-radius:16px;padding:12px 14px;margin:0 0 14px}
+.sug h3{margin:0 0 6px;font-size:1rem}
+.sug ul{list-style:none;margin:0;padding:0}
+.sug li{display:flex;align-items:center;gap:8px;padding:8px 0;border-top:1px solid rgba(0,0,0,.08)}
+.sug li:first-child{border-top:0}
+.sug li div{flex:1;min-width:0}
+.sug li small{display:block;color:var(--muted)}
+.sug .btn{min-height:38px;padding:6px 10px;font-size:.88rem}
+.l-store{grid-column:2/4;font-size:.85rem;color:var(--ok)}
+.tips{background:var(--soft);border-radius:14px;padding:10px 12px;margin:10px 0 4px;font-size:.92rem}
+.alerta{background:var(--out-soft);color:var(--ink);border-radius:14px;padding:10px 12px;margin:10px 0 4px;font-size:.92rem}
+.wa{width:100%;margin-top:14px}
+.budget{background:var(--surface);border:1px solid var(--line);border-radius:20px;padding:16px;margin:10px 0 6px}
+.b-top{display:flex;justify-content:space-between;align-items:baseline;gap:10px}
+.b-top b{display:block;font-size:2rem;font-weight:800;letter-spacing:-0.02em;line-height:1.1}
+.bar-b{height:12px;border-radius:999px;background:var(--soft);overflow:hidden;margin:10px 0 6px}
+.bar-b span{display:block;height:100%;border-radius:999px;background:var(--ok)}
+.bar-b span.mid{background:var(--low)}.bar-b span.hi{background:var(--out)}
+.budget p{margin:4px 0;color:var(--muted);font-size:.92rem}
+.b-set{display:flex;gap:8px;margin-top:10px}
+.b-set input{flex:1;min-width:0}
+.cats{margin-top:14px}
+.cat-r{display:grid;grid-template-columns:minmax(90px,38%) 1fr auto;gap:8px;align-items:center;font-size:.9rem;padding:3px 0}
+.cat-r .cb{height:10px;border-radius:999px;background:var(--brand)}
+.cat-r b{white-space:nowrap}
+.stores{font-size:.9rem;padding:0 0 12px}
+.stores b{display:block;margin-bottom:4px}
 #dlg-ticket{max-width:min(600px,96vw);padding:0;max-height:92vh}
 #dlg-ticket[open]{display:flex;flex-direction:column}
 .tk-head{padding:18px 18px 10px;border-bottom:1px solid var(--line)}
@@ -239,6 +266,7 @@ dialog label .field{display:block;width:100%;margin-top:4px;font-weight:400}
           <button type="submit" value="poco" class="btn low">Queda poco</button>
         </div>
       </form>
+      <div id="sug-casa"></div>
       <div class="chips" role="group" aria-label="Mostrar">
         <button class="chip" data-act="filtro" data-f="todo">Todo</button>
         <button class="chip" data-act="filtro" data-f="pend">Lo que falta</button>
@@ -258,12 +286,16 @@ dialog label .field{display:block;width:100%;margin-top:4px;font-weight:400}
         </div>
         <p class="muted" style="margin:8px 0 0;font-size:.85rem">¿Ticket largo? Haz una foto de arriba, otra de abajo, y luego pulsa Leer. ¿Varios tickets? Una foto por ticket (hasta 4).</p>
       </div>
+      <div id="lista-alerta"></div>
       <div class="tienda">
         <label for="tienda" class="sr">Tienda</label>
         <input id="tienda" data-k="tienda" class="field" placeholder="¿Dónde compras hoy? (Mercadona, Lidl…)" list="dl-tiendas">
       </div>
+      <div id="lista-tips"></div>
+      <div id="sug-lista"></div>
       <ul class="rows" id="lista-list"></ul>
       <div class="extra" id="extra-box"></div>
+      <div id="wa-box"></div>
     </section>
 
     <section id="v-precios" class="view" hidden>
@@ -338,7 +370,7 @@ const SHORT={hay:"Hay",poco:"Poco",falta:"Se acabó"};
 const PRIO={falta:0,poco:1,hay:2};
 const TITLES={casa:"En casa",lista:"Por comprar",precios:"Precios"};
 
-const S={productos:{},compras:{}};
+const S={productos:{},compras:{},ajustes:{}};
 let mode="cargando",tab="casa",filtro="todo",IDX={},editId=null,armed=null;
 const LS={get(k,d){try{const v=localStorage.getItem(k);return v?JSON.parse(v):d}catch(e){return d}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}};
 let draft=(()=>{const d=LS.get("mercado.draft",null);return d&&d.items?d:{items:{},tienda:""}})();
@@ -369,9 +401,11 @@ const saveOut=()=>LS.set("mercado.outbox",outbox);
 const saveCache=()=>LS.set("mercado.cache",S);
 const toRow=(col,id,d)=>col==="productos"
   ?{id,nombre:d.nombre,cat:d.cat||"Otros",estado:d.estado,cambio:d.cambio??null,ultimo_precio:d.ultimoPrecio??null,updated_at:new Date().toISOString()}
+  :col==="ajustes"?{id,valor:d,updated_at:new Date().toISOString()}
   :{id,ts:d.ts,tienda:d.tienda||"",items:d.items||[],total:d.total||0};
 const fromRow=(col,r)=>col==="productos"
   ?{nombre:r.nombre,cat:r.cat,estado:r.estado,cambio:r.cambio!=null?Number(r.cambio):null,...(r.ultimo_precio!=null?{ultimoPrecio:Number(r.ultimo_precio)}:{})}
+  :col==="ajustes"?(r.valor||{})
   :{ts:Number(r.ts),tienda:r.tienda||"",items:r.items||[],total:Number(r.total)||0};
 
 function put(col,id,data){
@@ -403,8 +437,10 @@ async function loadAll(){
   const P={},C={};
   p.data.forEach(r=>P[r.id]=fromRow("productos",r));
   c.data.forEach(r=>C[r.id]=fromRow("compras",r));
-  for(const o of outbox){const t=o.col==="productos"?P:C;if(o.op==="up")t[o.id]=fromRow(o.col,o.row);else delete t[o.id]}
-  S.productos=P;S.compras=C;mode="ok";saveCache();render();
+  const A={};
+  try{const a=await sb.from("ajustes").select("*");if(!a.error)a.data.forEach(r=>A[r.id]=fromRow("ajustes",r));else Object.assign(A,S.ajustes||{})}catch(e){Object.assign(A,S.ajustes||{})}
+  for(const o of outbox){const t=o.col==="productos"?P:o.col==="ajustes"?A:C;if(o.op==="up")t[o.id]=fromRow(o.col,o.row);else delete t[o.id]}
+  S.productos=P;S.compras=C;S.ajustes=A;mode="ok";saveCache();render();
 }
 let channel=null;
 function subscribe(){
@@ -419,15 +455,85 @@ function subscribe(){
   channel=sb.channel("casa")
     .on("postgres_changes",{event:"*",schema:"public",table:"productos"},h("productos"))
     .on("postgres_changes",{event:"*",schema:"public",table:"compras"},h("compras"))
+    .on("postgres_changes",{event:"*",schema:"public",table:"ajustes"},h("ajustes"))
     .subscribe();
 }
 function setEstado(id,e){const p=S.productos[id];if(!p||p.estado===e)return;put("productos",id,{...p,estado:e,cambio:Date.now()})}
 
+let BUY={};
 function buildIdx(){
-  IDX={};
+  IDX={};BUY={};
   Object.values(S.compras).sort((a,b)=>a.ts-b.ts).forEach(c=>(c.items||[]).forEach(i=>{
+    (BUY[i.id]=BUY[i.id]||[]).push(c.ts);
     if(i.precio==null||!isFinite(i.precio))return;(IDX[i.id]=IDX[i.id]||[]).push({ts:c.ts,p:i.precio,t:c.tienda||"",n:i.nombre});
   }));
+}
+
+/* ---------- Reposición, tiendas y presupuesto ---------- */
+const CADENAS=[["mercadona","Mercadona"],["lidl","Lidl"],["carrefour","Carrefour"],["alcampo","Alcampo"],["aldi","Aldi"],["ahorramas","Ahorramas"],["eroski","Eroski"],["consum","Consum"],["el corte ingles","El Corte Inglés"],["hipercor","Hipercor"],["supercor","Supercor"],["family cash","Family Cash"],["coviran","Covirán"],["simply","Simply"],["makro","Makro"],["bm supermercados","BM"],["dia","Dia"]];
+function tiendaDe(t){
+  if(!t)return null;const n=" "+norm(t).replace(/[^a-z0-9]+/g," ").trim()+" ";
+  for(const[k,v]of CADENAS)if(n.includes(" "+k+" "))return{k,v};
+  const c=n.replace(/ (s ?a|s ?l ?u?|sociedad anonima) /g," ").trim();
+  return c?{k:c,v:String(t).trim()}:null;
+}
+function ritmo(id){
+  const ds=[...new Set((BUY[id]||[]).map(t=>Math.floor(t/DAY)))].sort((a,b)=>a-b);
+  if(ds.length<2)return null;
+  const g=ds.slice(1).map((d,i)=>d-ds[i]).sort((a,b)=>a-b),cada=g[Math.floor(g.length/2)];
+  if(cada<2)return null;
+  return{cada,pasados:Math.floor(Date.now()/DAY)-ds[ds.length-1]};
+}
+function sugerencias(){
+  const snz=LS.get("mercado.snooze",{}),now=Date.now(),out=[];
+  for(const[id,p]of Object.entries(S.productos)){
+    if(p.estado!=="hay"||(snz[id]&&snz[id]>now))continue;
+    const r=ritmo(id);if(r&&r.pasados>=r.cada)out.push({id,...r});
+  }
+  return out.sort((a,b)=>b.pasados/b.cada-a.pasados/a.cada);
+}
+function sugHtml(){
+  const sg=sugerencias();if(!sg.length)return"";
+  const ver=sg.slice(0,6);
+  return `<div class="sug"><h3>¿Se está acabando?</h3><ul>${ver.map(x=>`<li><div><b>${esc(S.productos[x.id].nombre)}</b><small>Lo compráis cada ${x.cada} días y van ${x.pasados}.</small></div><button class="btn low" data-act="sug-add" data-id="${x.id}">A la lista</button><button class="btn ghost" data-act="sug-no" data-id="${x.id}">Aún hay</button></li>`).join("")}</ul>${sg.length>6?`<small class="muted">Y ${sg.length-6} más.</small>`:""}</div>`;
+}
+function porTienda(id){
+  const m={};
+  for(const e of IDX[id]||[]){const t=tiendaDe(e.t);if(t)m[t.k]={k:t.k,v:t.v,p:e.p,ts:e.ts}}
+  return Object.values(m).sort((a,b)=>a.p-b.p);
+}
+function masBarato(id){
+  const l=porTienda(id).filter(x=>Date.now()-x.ts<120*DAY);
+  if(l.length<2||l[1].p-l[0].p<0.01)return null;
+  return{...l[0],otra:l[1]};
+}
+const itemImp=i=>i.importe!=null?Number(i.importe):(Number(i.precio)||0)*(Number(i.cant)||1);
+function mesActual(){
+  const now=new Date(),m=now.getMonth(),y=now.getFullYear(),cats={};let tot=0,n=0;
+  for(const c of Object.values(S.compras)){
+    const d=new Date(c.ts);if(d.getMonth()!==m||d.getFullYear()!==y)continue;
+    n++;tot+=Number(c.total)||0;
+    for(const i of c.items||[]){const cat=catOf(S.productos[i.id]||{cat:"Otros"});cats[cat]=(cats[cat]||0)+itemImp(i)}
+  }
+  const dia=now.getDate(),dim=new Date(y,m+1,0).getDate();
+  return{tot,n,cats,dia,dim,pres:Number(S.ajustes.presupuesto&&S.ajustes.presupuesto.mensual)||0};
+}
+function avisoPres(){
+  const g=mesActual();if(!g.pres)return"";
+  const r=g.tot/g.pres;
+  if(r>=1)return ` Ojo: este mes llevas ${eur.format(g.tot)} y el presupuesto era ${eur.format(g.pres)}.`;
+  if(r>=0.8)return ` Llevas el ${Math.round(r*100)} % del presupuesto del mes.`;
+  return"";
+}
+function textoLista(){
+  const ids=listaIds();if(!ids.length)return"";
+  const by={};ids.forEach(id=>{const c=catOf(S.productos[id]);(by[c]=by[c]||[]).push(id)});
+  let t=`🛒 *Lista de la compra* (${fF(Date.now())})\n`;
+  for(const cat of CATS){
+    if(!by[cat])continue;t+=`\n*${cat}*\n`;
+    for(const id of by[cat]){const p=S.productos[id],mb=masBarato(id);t+=`• ${p.nombre}${p.estado==="falta"?" (se acabó)":""}${mb?` _(más barato en ${mb.v})_`:""}\n`}
+  }
+  return t;
 }
 const last=id=>{const h=IDX[id];return h&&h.length?h[h.length-1]:null};
 function prevBefore(id,ts){let r=null;for(const e of IDX[id]||[]){if(e.ts<ts)r=e;else break}return r}
@@ -466,6 +572,7 @@ function renderChrome(){
 
 function renderCasa(){
   const box=$("#casa-list");
+  $("#sug-casa").innerHTML=mode==="cargando"?"":sugHtml();
   if(mode==="cargando"){box.innerHTML=`<p class="empty-line">Cargando…</p>`;return}
   const all=Object.entries(S.productos).map(([id,p])=>({id,...p}));
   if(!all.length){
@@ -504,7 +611,14 @@ function deltaHtml(id){
 function renderLista(){
   const box=$("#lista-list"),ids=listaIds();
   if(document.activeElement!==$("#tienda"))$("#tienda").value=draft.tienda||"";
-  if(mode==="cargando"){box.innerHTML="";$("#extra-box").innerHTML="";return}
+  if(mode==="cargando"){box.innerHTML="";$("#extra-box").innerHTML="";$("#wa-box").innerHTML="";$("#lista-tips").innerHTML="";$("#sug-lista").innerHTML="";$("#lista-alerta").innerHTML="";return}
+  $("#sug-lista").innerHTML=sugHtml();
+  const cnt={};ids.forEach(id=>{const mb=masBarato(id);if(mb)cnt[mb.v]=(cnt[mb.v]||[]).concat(S.productos[id].nombre)});
+  const ks=Object.keys(cnt).sort((a,b)=>cnt[b].length-cnt[a].length);
+  $("#lista-tips").innerHTML=ks.length?`<div class="tips"><b>Dónde conviene:</b> ${ks.map(k=>`${esc(k)} (${cnt[k].map(esc).join(", ")})`).join("; ")}.</div>`:"";
+  const g=mesActual();
+  $("#lista-alerta").innerHTML=g.pres&&g.tot>=g.pres*0.9?`<div class="alerta">${g.tot>=g.pres?"⚠️ Ya pasaste":"⚠️ Estás cerca de"} el presupuesto del mes: ${eur.format(g.tot)} de ${eur.format(g.pres)}.</div>`:"";
+  $("#wa-box").innerHTML=ids.length?`<button class="btn ghost wa" data-act="wa">📤 Enviar lista por WhatsApp</button>`:"";
   box.innerHTML=!ids.length?`<li class="empty-line">No falta nada. Cuando algo se acabe, márcalo en En casa y aparecerá aquí.</li>`:ids.map(id=>{
     const p=S.productos[id],d=draft.items[id]||{},extra=p.estado==="hay";
     return `<li class="lrow ${d.on?"on":""}" data-row="${id}">
@@ -515,6 +629,7 @@ function renderLista(){
         <input class="qty" inputmode="numeric" data-act="cant" data-id="${id}" data-k="q-${id}" value="${esc(d.cant||"1")}" aria-label="Cantidad de ${esc(p.nombre)}">
       </div>
       <div class="l-delta" id="d-${id}">${deltaHtml(id)}</div>
+      ${(()=>{const mb=masBarato(id);return mb?`<div class="l-store">💡 Más barato en ${esc(mb.v)}: ${eur.format(mb.p)} (${esc(mb.otra.v)} ${eur.format(mb.otra.p)})</div>`:""})()}
     </li>`}).join("");
   const otros=Object.entries(S.productos).filter(([id,p])=>p.estado==="hay"&&!draft.items[id]).sort((a,b)=>a[1].nombre.localeCompare(b[1].nombre,"es"));
   $("#extra-box").innerHTML=otros.length?`<label for="extra-sel" class="sr">Añadir otro producto</label><select id="extra-sel" class="field" data-k="extra-sel"><option value="">Añadir algo más a la lista…</option>${otros.map(([id,p])=>`<option value="${id}">${esc(p.nombre)}</option>`).join("")}</select><button class="btn ghost" data-act="extra-add">Añadir</button>`:"";
@@ -545,24 +660,36 @@ function badge(ch){
   if(Math.abs(ch)<0.05)return `<span class="badge same">Igual</span>`;
   return `<span class="badge ${ch>0?"up":"down"}">${ch>0?"▲":"▼"} ${fP(Math.abs(ch))}</span>`;
 }
+function budgetHtml(){
+  const g=mesActual(),r=g.pres?g.tot/g.pres:0,cls=r>=1?"hi":r>=0.8?"mid":"";
+  const proy=g.dia>=5&&g.n?g.tot/g.dia*g.dim:null;
+  const mx=Math.max(1,...Object.values(g.cats));
+  const cats=Object.entries(g.cats).filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]);
+  return `<div class="budget">
+    <div class="b-top"><div><span class="muted">Gastado este mes</span><b>${eur.format(g.tot)}</b></div><div class="muted" style="text-align:right">${g.pres?`de ${eur.format(g.pres)}`:""}<br>${g.n} ${g.n===1?"compra":"compras"}</div></div>
+    ${g.pres?`<div class="bar-b" role="img" aria-label="${Math.round(r*100)} % del presupuesto"><span class="${cls}" style="width:${Math.min(100,r*100).toFixed(1)}%"></span></div>
+    <p>${r>=1?`<span class="up">Te has pasado ${eur.format(g.tot-g.pres)}.</span>`:`Te quedan ${eur.format(g.pres-g.tot)} para ${g.dim-g.dia+1} ${g.dim-g.dia+1===1?"día":"días"}.`}${proy?` A este ritmo acabarás el mes en unos ${eur.format(proy)}.`:""}</p>`
+    :`<p>Ponle un presupuesto al mes y te aviso cuando te acerques.</p>`}
+    <div class="b-set"><label class="sr" for="pres-in">Presupuesto al mes</label><input id="pres-in" class="field" inputmode="decimal" data-k="pres-in" placeholder="Presupuesto al mes (€)" value="${g.pres?String(g.pres).replace(".",","):""}"><button class="btn ghost" data-act="pres-save">Guardar</button></div>
+    ${cats.length?`<div class="cats">${cats.map(([c,v])=>`<div class="cat-r"><span>${c}</span><div class="cb" style="width:${(v/mx*100).toFixed(1)}%"></div><b>${eur.format(v)}</b></div>`).join("")}</div>`:""}
+  </div>`;
+}
 function renderPrecios(){
   const box=$("#precios-box");
   if(mode==="cargando"){box.innerHTML="";return}
   const compras=Object.entries(S.compras).map(([id,c])=>({id,...c})).sort((a,b)=>b.ts-a.ts);
   if(!compras.length){box.innerHTML=`<div class="empty"><p>Todavía no hay compras. En Por comprar, apunta el precio de cada cosa mientras compras y pulsa Terminar compra. Desde la segunda compra verás cuánto ha subido cada producto.</p></div>`;return}
   const ci=cestaInfo();
-  const now=new Date(),mes=compras.filter(c=>{const d=new Date(c.ts);return d.getMonth()===now.getMonth()&&d.getFullYear()===now.getFullYear()});
-  const gMes=mes.reduce((s,c)=>s+(c.total||0),0);
   let h=`<div class="cesta">${ci?`<div class="big ${Math.abs(ci.avg)<0.05?"":ci.avg>0?"up":"down"}">${ci.avg>0?"+":Math.abs(ci.avg)<0.05?"":"−"}${fP(Math.abs(ci.avg))}</div><p>Es lo que ${ci.avg>=0?"subieron":"bajaron"} de media los ${ci.n} ${ci.n===1?"producto":"productos"} de tu compra del ${fF(ci.c.ts)}, frente a la vez anterior que los compraste.</p>`:`<p>Cuando compres algo por segunda vez con precio, aquí verás cuánto ha subido tu compra.</p>`}</div>
-  <div class="stats"><div class="stat"><b>${eur.format(gMes)}</b><span>gastado este mes</span></div><div class="stat"><b>${mes.length}</b><span>${mes.length===1?"compra":"compras"} este mes</span></div></div>`;
+  ${budgetHtml()}`;
 
   const rows=Object.keys(IDX).map(id=>{const hs=IDX[id],l=hs[hs.length-1],pv=hs.length>1?hs[hs.length-2]:null;
     return{id,nombre:S.productos[id]?.nombre||l.n||"Producto",hs,l,ch:pv&&pv.p>0?pct(l.p,pv.p):null}})
     .sort((a,b)=>(a.ch==null)-(b.ch==null)||(b.ch??0)-(a.ch??0)||a.nombre.localeCompare(b.nombre,"es"));
   h+=`<h2 class="sec">Producto por producto</h2><p class="muted" style="margin:0 0 4px">Cambio frente a la compra anterior. Toca uno para ver su historial.</p>`;
-  h+=rows.map(r=>`<details class="p"><summary><span class="p-name">${esc(r.nombre)}<small>${eur.format(r.l.p)} c/u, ${fF(r.l.ts)}</small></span>${spark(r.hs)}${badge(r.ch)}</summary>
+  h+=rows.map(r=>`<details class="p"><summary><span class="p-name">${esc(r.nombre)}<small>${eur.format(r.l.p)} c/u, ${fF(r.l.ts)}${(()=>{const mb=masBarato(r.id);return mb?`. Más barato en ${esc(mb.v)}`:""})()}</small></span>${spark(r.hs)}${badge(r.ch)}</summary>
     <div class="tw"><table class="h"><thead><tr><th>Fecha</th><th>Tienda</th><th class="n">Precio</th><th class="n">Cambio</th></tr></thead><tbody>${r.hs.slice().reverse().map((e,i,arr)=>{const nx=arr[i+1];const c=nx&&nx.p>0?pct(e.p,nx.p):null;
-      return `<tr><td>${fF(e.ts)}</td><td>${esc(e.t)||"—"}</td><td class="n">${eur.format(e.p)}</td><td class="n ${c==null||Math.abs(c)<0.05?"muted":c>0?"up":"down"}">${c==null?"—":Math.abs(c)<0.05?"=":(c>0?"+":"−")+fP(Math.abs(c))}</td></tr>`}).join("")}</tbody></table></div></details>`).join("");
+      return `<tr><td>${fF(e.ts)}</td><td>${esc(e.t)||"—"}</td><td class="n">${eur.format(e.p)}</td><td class="n ${c==null||Math.abs(c)<0.05?"muted":c>0?"up":"down"}">${c==null?"—":Math.abs(c)<0.05?"=":(c>0?"+":"−")+fP(Math.abs(c))}</td></tr>`}).join("")}</tbody></table></div>${(()=>{const pt=porTienda(r.id);return pt.length>1?`<div class="stores"><b>Último precio en cada tienda</b>${pt.map((x,i)=>`<div>${i===0?"💡 ":""}${esc(x.v)}: ${eur.format(x.p)} <span class="muted">(${fF(x.ts)})</span></div>`).join("")}</div>`:""})()}</details>`).join("");
 
   h+=`<h2 class="sec">Compras</h2>`;
   h+=compras.map(c=>`<details class="p"><summary><span class="p-name">${fFL(c.ts)}<small>${esc(c.tienda)||"Sin tienda"}, ${(c.items||[]).length} productos</small></span><span></span><b>${eur.format(c.total||0)}</b></summary>
@@ -590,7 +717,7 @@ async function terminar(){
   items.forEach(i=>delete draft.items[i.id]);saveDraft();render();
   let m=`Compra guardada: ${eur.format(total)}.`;
   if(ch.length){const a=ch.reduce((x,y)=>x+y,0)/ch.length;m+=Math.abs(a)<0.05?" Los precios siguen igual que la última vez.":` Lo que ya habías comprado ${a>0?"subió":"bajó"} ${fP(Math.abs(a))} de media.`}
-  toast(m,6000);
+  toast(m+avisoPres(),7000);
 }
 
 document.addEventListener("click",ev=>{
@@ -608,6 +735,10 @@ document.addEventListener("click",ev=>{
     case"extra-del":delete draft.items[id];saveDraft();render();break;
     case"del-compra":if(armed==="c-"+id){armed=null;del("compras",id);toast("Compra borrada.")}else{armed="c-"+id;renderPrecios()}break;
     case"terminar":terminar();break;
+    case"sug-add":setEstado(id,"poco");toast(`${S.productos[id]?.nombre||"Producto"} añadido a la lista.`);break;
+    case"sug-no":{const r=ritmo(id),snz=LS.get("mercado.snooze",{});snz[id]=Date.now()+Math.max(2,Math.round((r?r.cada:4)/2))*DAY;LS.set("mercado.snooze",snz);render();break}
+    case"wa":{const t=textoLista();if(!t)return;window.open("https://wa.me/?text="+encodeURIComponent(t),"_blank");break}
+    case"pres-save":{const v=parseNum($("#pres-in").value);if(isFinite(v)&&v>0){put("ajustes","presupuesto",{mensual:Math.round(v*100)/100});toast(`Presupuesto guardado: ${eur.format(v)} al mes.`)}else{if(S.ajustes.presupuesto)del("ajustes","presupuesto");toast("Presupuesto quitado.")}break}
   }
 });
 document.addEventListener("change",ev=>{
@@ -812,7 +943,7 @@ $("#tk-save").addEventListener("click",()=>{
   });
   if(!nCompras){toast("No hay ningún producto marcado para guardar.");return}
   saveDraft();$("#dlg-ticket").close();TK=null;render();
-  toast(nCompras>1?`${nCompras} compras guardadas: ${eur.format(totalG)}, ${nProd} productos.`:`Compra guardada desde el ticket: ${eur.format(totalG)}, ${nProd} productos.`,5000);
+  toast((nCompras>1?`${nCompras} compras guardadas: ${eur.format(totalG)}, ${nProd} productos.`:`Compra guardada desde el ticket: ${eur.format(totalG)}, ${nProd} productos.`)+avisoPres(),7000);
 });
 
 /* ---------- Sesión y arranque ---------- */
@@ -840,7 +971,7 @@ document.addEventListener("visibilitychange",()=>{if(document.visibilityState===
 
 async function init(){
   const cache=LS.get("mercado.cache",null);
-  if(cache&&cache.productos){S.productos=cache.productos;S.compras=cache.compras||{};mode="ok"}
+  if(cache&&cache.productos){S.productos=cache.productos;S.compras=cache.compras||{};S.ajustes=cache.ajustes||{};mode="ok"}
   const{data}=await sb.auth.getSession();
   session=data.session;
   sb.auth.onAuthStateChange((_e,s)=>{session=s;if(s)start();else{started=false;showApp(false)}});
