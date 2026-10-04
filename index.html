@@ -702,9 +702,10 @@ $("#scan-go").addEventListener("click",async()=>{
     if(!data.session)throw new Error("Sesión caducada. Vuelve a entrar.");
     const r=await fetch("/api/ticket",{method:"POST",headers:{"Content-Type":"application/json",Authorization:"Bearer "+data.session.access_token},
       body:JSON.stringify({files:PEND,productos:Object.entries(S.productos).map(([id,p])=>({id,nombre:p.nombre}))})});
-    let j=await r.json().catch(()=>({}));
+    const raw=await r.text();let j={};try{j=JSON.parse(raw)}catch(e){}
     if(r.status===413)throw new Error("Las fotos pesan demasiado. Quita alguna e inténtalo otra vez.");
-    if(!r.ok)throw new Error(j.error||"No se pudo leer el ticket.");
+    if(r.status===504||/TIMEOUT/i.test(raw))throw new Error("Claude tardó demasiado (error 504). Prueba con menos fotos a la vez.");
+    if(!r.ok)throw new Error(`Error ${r.status}: ${j.error||raw.replace(/<[^>]*>/g," ").replace(/\s+/g," ").trim().slice(0,140)||"sin detalle"}`);
     const tks=Array.isArray(j.tickets)?j.tickets:(j.lineas?[j]:[]);
     if(!tks.length||!tks.some(t=>t.lineas&&t.lineas.length))throw new Error("No encontré productos. Prueba con más luz y los tickets bien estirados.");
     PEND=[];renderTray();
