@@ -173,12 +173,23 @@ dialog label .field{display:block;width:100%;margin-top:4px;font-weight:400}
 .logout{margin-top:32px;display:flex;justify-content:center}
 .scan{width:100%;margin:12px 0 2px;display:flex;align-items:center;justify-content:center;gap:8px;font-size:1.02rem}
 .scan[disabled]{opacity:.7;cursor:progress}
+.tray{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:12px;margin:12px 0 2px}
+.thumbs{display:flex;gap:8px;overflow-x:auto;padding-bottom:4px}
+.thumb{position:relative;flex:none;width:72px;height:96px;border-radius:10px;overflow:hidden;background:var(--soft);display:flex;align-items:center;justify-content:center;font-weight:600;color:var(--muted)}
+.thumb img{width:100%;height:100%;object-fit:cover}
+.thumb .rm{position:absolute;top:4px;right:4px;width:26px;height:26px;border-radius:999px;border:0;background:rgba(0,0,0,.65);color:#fff;cursor:pointer;font-size:.8rem}
+.tray-actions{display:flex;gap:8px;margin-top:10px}
+.tray-actions .btn{flex:1}
 #dlg-ticket{max-width:min(600px,96vw);padding:0;max-height:92vh}
 #dlg-ticket[open]{display:flex;flex-direction:column}
 .tk-head{padding:18px 18px 10px;border-bottom:1px solid var(--line)}
 .tk-head h2{margin:0 0 4px}
 .tk-head .field{width:100%;margin-top:8px}
 .tk-list{list-style:none;margin:0;padding:0 18px;overflow-y:auto;flex:1}
+.tk-group{list-style:none;padding:14px 0 4px;border-bottom:2px solid var(--ink)}
+.tk-group .tk-gh{display:flex;justify-content:space-between;align-items:baseline;gap:10px;font-weight:800;font-size:1.1rem}
+.tk-group .tk-gh small{font-weight:400;color:var(--muted);font-size:.85rem}
+.tk-group .field{width:100%;margin-top:8px}
 .tk-row{padding:12px 0;border-bottom:1px solid var(--line)}
 .tk-row.skip{opacity:.55}
 .tk-top{display:flex;justify-content:space-between;gap:10px;font-size:.88rem;color:var(--muted);margin-bottom:6px}
@@ -239,6 +250,14 @@ dialog label .field{display:block;width:100%;margin-top:4px;font-weight:400}
     <section id="v-lista" class="view" hidden>
       <button class="btn primary scan" id="scan-btn" type="button"><span aria-hidden="true">📷</span> <span id="scan-txt">Escanear ticket</span></button>
       <input type="file" id="scan-file" accept="image/*,application/pdf" multiple hidden>
+      <div class="tray" id="scan-tray" hidden>
+        <div class="thumbs" id="thumbs"></div>
+        <div class="tray-actions">
+          <button class="btn ghost" type="button" id="scan-more">➕ Otra foto</button>
+          <button class="btn primary" type="button" id="scan-go">Leer ticket</button>
+        </div>
+        <p class="muted" style="margin:8px 0 0;font-size:.85rem">¿Ticket largo? Haz una foto de arriba, otra de abajo, y luego pulsa Leer. ¿Varios tickets? Una foto por ticket (hasta 4).</p>
+      </div>
       <div class="tienda">
         <label for="tienda" class="sr">Tienda</label>
         <input id="tienda" data-k="tienda" class="field" placeholder="¿Dónde compras hoy? (Mercadona, Lidl…)" list="dl-tiendas">
@@ -297,8 +316,6 @@ dialog label .field{display:block;width:100%;margin-top:4px;font-weight:400}
   <div class="tk-head">
     <h2 id="tk-title">Revisa el ticket</h2>
     <p class="muted" style="margin:0" id="tk-info"></p>
-    <label class="sr" for="tk-tienda">Tienda</label>
-    <input id="tk-tienda" class="field" data-k="tk-tienda" placeholder="Tienda" list="dl-tiendas">
   </div>
   <ul class="tk-list" id="tk-list"></ul>
   <div class="tk-foot">
@@ -643,44 +660,68 @@ let TK=null;
 function b64(file){return new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(String(r.result).split(",")[1]);r.onerror=()=>rej(new Error("No se pudo leer el archivo."));r.readAsDataURL(file)})}
 function shrink(file){return new Promise((res,rej)=>{
   const url=URL.createObjectURL(file),img=new Image();
-  img.onload=()=>{const max=2000,k=Math.min(1,max/Math.max(img.width,img.height));const c=document.createElement("canvas");
+  img.onload=()=>{const max=1800,k=Math.min(1,max/Math.max(img.width,img.height));const c=document.createElement("canvas");
     c.width=Math.round(img.width*k);c.height=Math.round(img.height*k);c.getContext("2d").drawImage(img,0,0,c.width,c.height);
-    URL.revokeObjectURL(url);res({type:"image/jpeg",data:c.toDataURL("image/jpeg",0.82).split(",")[1]})};
+    URL.revokeObjectURL(url);res({type:"image/jpeg",data:c.toDataURL("image/jpeg",0.8).split(",")[1]})};
   img.onerror=()=>{URL.revokeObjectURL(url);rej(new Error("No se pudo abrir la foto."))};
   img.src=url;})}
-function scanning(on){const b=$("#scan-btn");b.disabled=on;$("#scan-txt").textContent=on?"Leyendo ticket… (unos segundos)":"Escanear ticket"}
+let PEND=[];
+function scanning(on){
+  $("#scan-btn").disabled=on;$("#scan-go").disabled=on;$("#scan-more").disabled=on;
+  $("#scan-txt").textContent=on?"Leyendo ticket… (unos segundos)":"Escanear ticket";
+  $("#scan-go").textContent=on?"Leyendo… (unos segundos)":(PEND.length>1?`Leer ${PEND.length} fotos`:"Leer ticket");
+}
+function renderTray(){
+  const has=PEND.length>0;
+  $("#scan-tray").hidden=!has;$("#scan-btn").hidden=has;
+  $("#thumbs").innerHTML=PEND.map((f,i)=>`<div class="thumb">${f.type==="application/pdf"?"PDF":`<img src="data:${f.type};base64,${f.data}" alt="Foto ${i+1}">`}<button class="rm" type="button" data-rm="${i}" aria-label="Quitar foto ${i+1}">✕</button></div>`).join("");
+  $("#scan-more").hidden=PEND.length>=4;
+  scanning(false);
+}
 $("#scan-btn").addEventListener("click",()=>$("#scan-file").click());
+$("#scan-more").addEventListener("click",()=>$("#scan-file").click());
+$("#thumbs").addEventListener("click",ev=>{const b=ev.target.closest("[data-rm]");if(!b)return;PEND.splice(+b.dataset.rm,1);renderTray()});
 $("#scan-file").addEventListener("change",async ev=>{
-  const fs=[...ev.target.files].slice(0,4);ev.target.value="";
+  const fs=[...ev.target.files];ev.target.value="";
   if(!fs.length)return;
+  for(const f of fs){
+    if(PEND.length>=4){toast("Máximo 4 fotos por lectura.");break}
+    try{
+      if(f.type==="application/pdf"){if(f.size>3.5e6)throw new Error("El PDF es muy grande (máximo 3,5 MB).");PEND.push({type:f.type,data:await b64(f)})}
+      else PEND.push(await shrink(f));
+    }catch(e){toast(e.message||"No se pudo abrir la foto.")}
+  }
+  renderTray();
+});
+$("#scan-go").addEventListener("click",async()=>{
+  if(!PEND.length)return;
   if(!navigator.onLine){toast("Necesitas conexión para leer el ticket.");return}
   scanning(true);
   try{
-    const files=[];
-    for(const f of fs){
-      if(f.type==="application/pdf"){if(f.size>3.5e6)throw new Error("El PDF es muy grande (máximo 3,5 MB).");files.push({type:f.type,data:await b64(f)})}
-      else files.push(await shrink(f));
-    }
     const{data}=await sb.auth.getSession();
     if(!data.session)throw new Error("Sesión caducada. Vuelve a entrar.");
     const r=await fetch("/api/ticket",{method:"POST",headers:{"Content-Type":"application/json",Authorization:"Bearer "+data.session.access_token},
-      body:JSON.stringify({files,productos:Object.entries(S.productos).map(([id,p])=>({id,nombre:p.nombre}))})});
-    const j=await r.json().catch(()=>({}));
+      body:JSON.stringify({files:PEND,productos:Object.entries(S.productos).map(([id,p])=>({id,nombre:p.nombre}))})});
+    let j=await r.json().catch(()=>({}));
+    if(r.status===413)throw new Error("Las fotos pesan demasiado. Quita alguna e inténtalo otra vez.");
     if(!r.ok)throw new Error(j.error||"No se pudo leer el ticket.");
-    if(!j.lineas||!j.lineas.length)throw new Error("No encontré productos. Prueba con más luz y el ticket bien estirado.");
-    openTicket(j);
+    const tks=Array.isArray(j.tickets)?j.tickets:(j.lineas?[j]:[]);
+    if(!tks.length||!tks.some(t=>t.lineas&&t.lineas.length))throw new Error("No encontré productos. Prueba con más luz y los tickets bien estirados.");
+    PEND=[];renderTray();
+    openTicket({tickets:tks});
   }catch(e){toast(e.message||"Error leyendo el ticket.",6000)}
   finally{scanning(false)}
 });
 function tkPrecio(l){const p=parseNum(l.precio);return isFinite(p)?p:null}
 function tkImporte(l){const p=tkPrecio(l),q=parseNum(l.cant);return p!=null&&isFinite(q)?Math.round(p*q*100)/100:(l.importe??0)}
 function openTicket(j){
-  TK={fecha:j.fecha,total:j.total,lineas:j.lineas.map(l=>({...l,
+  TK={tickets:j.tickets.map(t=>({tienda:t.tienda||"",fecha:t.fecha,total:t.total,lineas:(t.lineas||[]).map(l=>({...l,
     accion:l.ignorar?"__skip":(l.producto_id&&S.productos[l.producto_id]?l.producto_id:"__new"),
     precio:l.precio_unitario!=null?String(l.precio_unitario).replace(".",","):(l.importe!=null&&l.cantidad?String(Math.round(l.importe/l.cantidad*100)/100).replace(".",","):""),
-    cant:String(l.cantidad||1).replace(".",",")}))};
-  $("#tk-tienda").value=j.tienda||draft.tienda||"";
-  $("#tk-info").textContent=[j.fecha?`Ticket del ${fF(Date.parse(j.fecha+"T12:00:00"))}`:"",`${j.lineas.length} líneas leídas`,"Corrige lo que haga falta antes de guardar."].filter(Boolean).join(". ")+"";
+    cant:String(l.cantidad||1).replace(".",",")}))}))};
+  const n=TK.tickets.length,nl=TK.tickets.reduce((s,t)=>s+t.lineas.length,0);
+  $("#tk-title").textContent=n>1?`Revisa los ${n} tickets`:"Revisa el ticket";
+  $("#tk-info").textContent=`${nl} líneas leídas. Corrige lo que haga falta antes de guardar.`;
   renderTicket();
   const d=$("#dlg-ticket");if(d.showModal)d.showModal();else d.setAttribute("open","");
 }
@@ -692,66 +733,85 @@ function tkDelta(l){
   if(Math.abs(ch)<0.05)return `<span class="muted">Igual que la última vez (${eur.format(lp.p)}).</span>`;
   return `<span class="${ch>0?"up":"down"}">${ch>0?"▲ Subió":"▼ Bajó"} ${fP(Math.abs(ch))} desde ${eur.format(lp.p)} (${fF(lp.ts)})</span>`;
 }
+const tkSum=t=>t.lineas.filter(l=>l.accion!=="__skip").reduce((s,l)=>s+tkImporte(l),0);
 function renderTicket(){
   const prods=Object.entries(S.productos).sort((a,b)=>a[1].nombre.localeCompare(b[1].nombre,"es"));
-  $("#tk-list").innerHTML=TK.lineas.map((l,i)=>`<li class="tk-row ${l.accion==="__skip"?"skip":""}" data-tki="${i}">
-    <div class="tk-top"><span>${esc(l.texto)}</span><b id="tk-imp-${i}">${eur.format(tkImporte(l))}</b></div>
-    <label class="sr" for="tk-a-${i}">Producto</label>
-    <select class="field" id="tk-a-${i}" data-tk="accion" data-i="${i}" data-k="tk-a-${i}">
-      <option value="__new" ${l.accion==="__new"?"selected":""}>➕ Nuevo: ${esc(l.nombre)}</option>
-      <option value="__skip" ${l.accion==="__skip"?"selected":""}>✕ No guardar</option>
-      <optgroup label="Tus productos">${prods.map(([id,p])=>`<option value="${id}" ${l.accion===id?"selected":""}>${esc(p.nombre)}</option>`).join("")}</optgroup>
-    </select>
-    <div class="tk-nums">
-      <label>${l.por_peso?"Kilos":"Cantidad"}<input class="field" inputmode="decimal" data-tk="cant" data-i="${i}" data-k="tk-c-${i}" value="${esc(l.cant)}"></label>
-      <label>${l.por_peso?"€ por kg":"€ cada uno"}<input class="field" inputmode="decimal" data-tk="precio" data-i="${i}" data-k="tk-p-${i}" value="${esc(l.precio)}"></label>
-    </div>
-    <div class="tk-delta" id="tk-d-${i}">${tkDelta(l)}</div>
+  const multi=TK.tickets.length>1;
+  $("#tk-list").innerHTML=TK.tickets.map((t,ti)=>`<li class="tk-group">
+    <div class="tk-gh"><span>${multi?`Ticket ${ti+1}`:"Ticket"}${t.fecha?` <small>${fF(Date.parse(t.fecha+"T12:00:00"))}</small>`:""}</span><span id="tk-gt-${ti}">${eur.format(tkSum(t))}</span></div>
+    ${t.total!=null?`<small class="muted">Total impreso en el ticket: ${eur.format(t.total)}</small>`:""}
+    <label class="sr" for="tk-tienda-${ti}">Tienda</label>
+    <input class="field" id="tk-tienda-${ti}" data-tk="tienda" data-t="${ti}" data-k="tk-tienda-${ti}" value="${esc(t.tienda)}" placeholder="Tienda" list="dl-tiendas">
+    <ul class="rows">${t.lineas.map((l,i)=>`<li class="tk-row ${l.accion==="__skip"?"skip":""}">
+      <div class="tk-top"><span>${esc(l.texto)}</span><b id="tk-imp-${ti}-${i}">${eur.format(tkImporte(l))}</b></div>
+      <label class="sr" for="tk-a-${ti}-${i}">Producto</label>
+      <select class="field" id="tk-a-${ti}-${i}" data-tk="accion" data-t="${ti}" data-i="${i}" data-k="tk-a-${ti}-${i}">
+        <option value="__new" ${l.accion==="__new"?"selected":""}>➕ Nuevo: ${esc(l.nombre)}</option>
+        <option value="__skip" ${l.accion==="__skip"?"selected":""}>✕ No guardar</option>
+        <optgroup label="Tus productos">${prods.map(([id,p])=>`<option value="${id}" ${l.accion===id?"selected":""}>${esc(p.nombre)}</option>`).join("")}</optgroup>
+      </select>
+      <div class="tk-nums">
+        <label>${l.por_peso?"Kilos":"Cantidad"}<input class="field" inputmode="decimal" data-tk="cant" data-t="${ti}" data-i="${i}" data-k="tk-c-${ti}-${i}" value="${esc(l.cant)}"></label>
+        <label>${l.por_peso?"€ por kg":"€ cada uno"}<input class="field" inputmode="decimal" data-tk="precio" data-t="${ti}" data-i="${i}" data-k="tk-p-${ti}-${i}" value="${esc(l.precio)}"></label>
+      </div>
+      <div class="tk-delta" id="tk-d-${ti}-${i}">${tkDelta(l)}</div>
+    </li>`).join("")}</ul>
   </li>`).join("");
   tkTotal();
 }
 function tkTotal(){
-  const inc=TK.lineas.filter(l=>l.accion!=="__skip");
-  const t=inc.reduce((s,l)=>s+tkImporte(l),0);
-  $("#tk-tot").innerHTML=`${eur.format(t)}<small>${inc.length} productos${TK.total!=null?`. Ticket: ${eur.format(TK.total)}`:""}</small>`;
+  const n=TK.tickets.length,t=TK.tickets.reduce((s,x)=>s+tkSum(x),0);
+  const np=TK.tickets.reduce((s,x)=>s+x.lineas.filter(l=>l.accion!=="__skip").length,0);
+  $("#tk-tot").innerHTML=`${eur.format(t)}<small>${n>1?`${n} tickets, `:""}${np} productos</small>`;
+  $("#tk-save").textContent=n>1?`Guardar ${n} compras`:"Guardar compra";
 }
 $("#tk-list").addEventListener("input",ev=>{
-  const t=ev.target,i=+t.dataset.i,k=t.dataset.tk;if(!TK||isNaN(i)||!k)return;
-  const l=TK.lineas[i];
-  if(k==="accion"){l.accion=t.value;t.closest(".tk-row").classList.toggle("skip",l.accion==="__skip")}
-  else l[k]=t.value;
-  $("#tk-imp-"+i).textContent=eur.format(tkImporte(l));
-  $("#tk-d-"+i).innerHTML=tkDelta(l);
+  const el=ev.target,ti=+el.dataset.t,k=el.dataset.tk;if(!TK||isNaN(ti)||!k)return;
+  const t=TK.tickets[ti];
+  if(k==="tienda"){t.tienda=el.value;return}
+  const i=+el.dataset.i,l=t.lineas[i];if(!l)return;
+  if(k==="accion"){l.accion=el.value;el.closest(".tk-row").classList.toggle("skip",l.accion==="__skip")}
+  else l[k]=el.value;
+  $(`#tk-imp-${ti}-${i}`).textContent=eur.format(tkImporte(l));
+  $(`#tk-d-${ti}-${i}`).innerHTML=tkDelta(l);
+  $(`#tk-gt-${ti}`).textContent=eur.format(tkSum(t));
   tkTotal();
 });
 $("#tk-cancel").addEventListener("click",()=>{$("#dlg-ticket").close();TK=null});
 $("#tk-save").addEventListener("click",()=>{
   if(!TK)return;
-  const now=Date.now();
-  let ts=TK.fecha?Date.parse(TK.fecha+"T12:00:00"):NaN;
-  if(!isFinite(ts)||ts>now||ts<now-60*DAY)ts=now;
-  const byId={};
-  for(const l of TK.lineas){
-    if(l.accion==="__skip")continue;
-    const precio=tkPrecio(l),cant=parseNum(l.cant)>0?parseNum(l.cant):1,imp=tkImporte(l);
-    let id=l.accion;
-    if(id==="__new"){
-      const ex=Object.entries(S.productos).find(([,p])=>norm(p.nombre)===norm(l.nombre));
-      if(ex)id=ex[0];
-      else{id=uid();put("productos",id,{nombre:l.nombre,cat:l.categoria||"Otros",estado:"hay",cambio:now,...(precio!=null?{ultimoPrecio:precio}:{})})}
+  const now=Date.now(),creados={};
+  let nCompras=0,totalG=0,nProd=0;
+  TK.tickets.forEach((t,ti)=>{
+    let ts=t.fecha?Date.parse(t.fecha+"T12:00:00"):NaN;
+    if(!isFinite(ts)||ts>now||ts<now-60*DAY)ts=now;
+    ts+=ti; // que no coincidan si son del mismo día
+    const byId={};
+    for(const l of t.lineas){
+      if(l.accion==="__skip")continue;
+      const precio=tkPrecio(l),cant=parseNum(l.cant)>0?parseNum(l.cant):1,imp=tkImporte(l);
+      let id=l.accion;
+      if(id==="__new"){
+        const key=norm(l.nombre);
+        const ex=Object.entries(S.productos).find(([,p])=>norm(p.nombre)===key);
+        if(ex)id=ex[0];
+        else if(creados[key])id=creados[key];
+        else{id=uid();creados[key]=id;put("productos",id,{nombre:l.nombre,cat:l.categoria||"Otros",estado:"hay",cambio:now,...(precio!=null?{ultimoPrecio:precio}:{})})}
+      }
+      if(!S.productos[id])continue;
+      if(byId[id]){const a=byId[id];a.cant=Math.round((a.cant+cant)*1000)/1000;a.importe=Math.round((a.importe+imp)*100)/100;if(!l.por_peso&&a.cant>0)a.precio=Math.round(a.importe/a.cant*100)/100}
+      else byId[id]={id,nombre:S.productos[id].nombre,precio:precio!=null?Math.round(precio*100)/100:null,cant,importe:imp};
     }
-    if(!S.productos[id])continue;
-    const nombre=S.productos[id].nombre;
-    if(byId[id]){const a=byId[id];a.cant=Math.round((a.cant+cant)*1000)/1000;a.importe=Math.round((a.importe+imp)*100)/100;if(!l.por_peso&&a.cant>0)a.precio=Math.round(a.importe/a.cant*100)/100}
-    else byId[id]={id,nombre,precio:precio!=null?Math.round(precio*100)/100:null,cant,importe:imp};
-  }
-  const items=Object.values(byId);
-  if(!items.length){toast("No hay ningún producto marcado para guardar.");return}
-  const total=Math.round(items.reduce((s,i)=>s+(i.importe||0),0)*100)/100;
-  put("compras",uid(),{ts,tienda:$("#tk-tienda").value.trim(),items,total});
-  for(const i of items){const p=S.productos[i.id];const np={...p,estado:"hay",cambio:now};if(i.precio!=null)np.ultimoPrecio=i.precio;put("productos",i.id,np);delete draft.items[i.id]}
+    const items=Object.values(byId);
+    if(!items.length)return;
+    const total=Math.round(items.reduce((s,i)=>s+(i.importe||0),0)*100)/100;
+    put("compras",uid(),{ts,tienda:(t.tienda||"").trim(),items,total});
+    for(const i of items){const p=S.productos[i.id];const np={...p,estado:"hay",cambio:now};if(i.precio!=null)np.ultimoPrecio=i.precio;put("productos",i.id,np);delete draft.items[i.id]}
+    nCompras++;totalG+=total;nProd+=items.length;
+  });
+  if(!nCompras){toast("No hay ningún producto marcado para guardar.");return}
   saveDraft();$("#dlg-ticket").close();TK=null;render();
-  toast(`Compra guardada desde el ticket: ${eur.format(total)}, ${items.length} productos.`,5000);
+  toast(nCompras>1?`${nCompras} compras guardadas: ${eur.format(totalG)}, ${nProd} productos.`:`Compra guardada desde el ticket: ${eur.format(totalG)}, ${nProd} productos.`,5000);
 });
 
 /* ---------- Sesión y arranque ---------- */
