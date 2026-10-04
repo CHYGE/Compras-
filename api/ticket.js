@@ -7,7 +7,7 @@ const CATS = ["Despensa","Nevera","Frutas y verduras","Carnes y pescado","Panade
 
 const SYSTEM = `Eres un lector de tickets de supermercado de España. Recibes una o varias fotos (o un PDF) y la lista de productos de una casa.
 En las imágenes puede haber UN ticket o VARIOS tickets distintos (por ejemplo, varios tickets juntos en una misma foto). Lee TODOS.
-Registra lo leído llamando a la herramienta "registrar_tickets". No escribas nada más.
+Registra lo leído llamando SIEMPRE a la herramienta "registrar_tickets" una sola vez, con todos los tickets. No respondas con texto.
 Reglas:
 - Un objeto en "tickets" por cada ticket físico distinto (otra tienda, otra fecha, otra hora, otro número de ticket u otro total = otro ticket). No mezcles líneas de tickets distintos.
 - Si un mismo ticket largo sale repartido en varias fotos que se solapan, es UN solo ticket y no dupliques líneas.
@@ -103,7 +103,7 @@ module.exports = async (req, res) => {
     const r = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: { "content-type": "application/json", "x-api-key": process.env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01" },
-      body: JSON.stringify({ model: MODEL, max_tokens: 8000, system: SYSTEM, tools: [TOOL], tool_choice: { type: "tool", name: "registrar_tickets" }, messages: [{ role: "user", content }] })
+      body: JSON.stringify({ model: MODEL, max_tokens: 8000, system: SYSTEM, tools: [TOOL], tool_choice: { type: "auto" }, messages: [{ role: "user", content }] })
     });
     j = await r.json();
     if (!r.ok) return res.status(502).json({ error: "Claude: " + ((j && j.error && j.error.message) || r.status) });
