@@ -171,6 +171,26 @@ dialog label .field{display:block;width:100%;margin-top:4px;font-weight:400}
 .login-in .field{display:block;width:100%;margin-top:4px;font-weight:400}
 .login-in .btn{width:100%;margin-top:6px}
 .logout{margin-top:32px;display:flex;justify-content:center}
+.scan{width:100%;margin:12px 0 2px;display:flex;align-items:center;justify-content:center;gap:8px;font-size:1.02rem}
+.scan[disabled]{opacity:.7;cursor:progress}
+#dlg-ticket{max-width:min(600px,96vw);padding:0;max-height:92vh}
+#dlg-ticket[open]{display:flex;flex-direction:column}
+.tk-head{padding:18px 18px 10px;border-bottom:1px solid var(--line)}
+.tk-head h2{margin:0 0 4px}
+.tk-head .field{width:100%;margin-top:8px}
+.tk-list{list-style:none;margin:0;padding:0 18px;overflow-y:auto;flex:1}
+.tk-row{padding:12px 0;border-bottom:1px solid var(--line)}
+.tk-row.skip{opacity:.55}
+.tk-top{display:flex;justify-content:space-between;gap:10px;font-size:.88rem;color:var(--muted);margin-bottom:6px}
+.tk-top b{color:var(--ink);white-space:nowrap}
+.tk-row select{width:100%}
+.tk-nums{display:flex;gap:8px;margin-top:6px}
+.tk-nums label{flex:1;font-size:.8rem;color:var(--muted)}
+.tk-nums input{display:block;width:100%;margin-top:2px}
+.tk-delta{font-size:.85rem;margin-top:4px;min-height:1em}
+.tk-foot{padding:12px 18px;border-top:1px solid var(--line);display:flex;align-items:center;gap:10px}
+.tk-foot .tot{flex:1;font-weight:600}
+.tk-foot .tot small{display:block;font-weight:400;color:var(--muted)}
 #toast{position:fixed;left:50%;bottom:calc(150px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);max-width:min(520px,90vw);background:var(--ink);color:var(--bg);padding:12px 16px;border-radius:14px;opacity:0;pointer-events:none;transition:opacity .2s;z-index:10;text-align:center}
 #toast.show{opacity:1}
 @media (prefers-reduced-motion:reduce){#toast{transition:none}}
@@ -217,6 +237,8 @@ dialog label .field{display:block;width:100%;margin-top:4px;font-weight:400}
     </section>
 
     <section id="v-lista" class="view" hidden>
+      <button class="btn primary scan" id="scan-btn" type="button"><span aria-hidden="true">📷</span> <span id="scan-txt">Escanear ticket</span></button>
+      <input type="file" id="scan-file" accept="image/*,application/pdf" multiple hidden>
       <div class="tienda">
         <label for="tienda" class="sr">Tienda</label>
         <input id="tienda" data-k="tienda" class="field" placeholder="¿Dónde compras hoy? (Mercadona, Lidl…)" list="dl-tiendas">
@@ -271,6 +293,20 @@ dialog label .field{display:block;width:100%;margin-top:4px;font-weight:400}
   </form>
 </dialog>
 
+<dialog id="dlg-ticket" aria-labelledby="tk-title">
+  <div class="tk-head">
+    <h2 id="tk-title">Revisa el ticket</h2>
+    <p class="muted" style="margin:0" id="tk-info"></p>
+    <label class="sr" for="tk-tienda">Tienda</label>
+    <input id="tk-tienda" class="field" data-k="tk-tienda" placeholder="Tienda" list="dl-tiendas">
+  </div>
+  <ul class="tk-list" id="tk-list"></ul>
+  <div class="tk-foot">
+    <div class="tot" id="tk-tot"></div>
+    <button class="btn ghost" type="button" id="tk-cancel">Cancelar</button>
+    <button class="btn primary" type="button" id="tk-save">Guardar compra</button>
+  </div>
+</dialog>
 <datalist id="dl-prod"></datalist>
 <datalist id="dl-tiendas"></datalist>
 <div id="toast" role="status" aria-live="polite"></div>
@@ -513,7 +549,7 @@ function renderPrecios(){
 
   h+=`<h2 class="sec">Compras</h2>`;
   h+=compras.map(c=>`<details class="p"><summary><span class="p-name">${fFL(c.ts)}<small>${esc(c.tienda)||"Sin tienda"}, ${(c.items||[]).length} productos</small></span><span></span><b>${eur.format(c.total||0)}</b></summary>
-    <div class="tw"><table class="h"><thead><tr><th>Producto</th><th class="n">Cant.</th><th class="n">Precio c/u</th></tr></thead><tbody>${(c.items||[]).map(i=>`<tr><td>${esc(i.nombre)}</td><td class="n">${i.cant}</td><td class="n">${i.precio==null?"—":eur.format(i.precio)}</td></tr>`).join("")}</tbody></table></div>
+    <div class="tw"><table class="h"><thead><tr><th>Producto</th><th class="n">Cant.</th><th class="n">Precio c/u</th></tr></thead><tbody>${(c.items||[]).map(i=>`<tr><td>${esc(i.nombre)}</td><td class="n">${Number(i.cant).toLocaleString("es-ES",{maximumFractionDigits:3})}</td><td class="n">${i.precio==null?"—":eur.format(i.precio)}</td></tr>`).join("")}</tbody></table></div>
     <div class="c-actions"><button class="btn ghost danger" data-act="del-compra" data-id="${c.id}">${armed==="c-"+c.id?"Toca otra vez para borrar":"Borrar esta compra"}</button></div></details>`).join("");
   const open=[...box.querySelectorAll("details[open] summary")].map(s=>s.textContent);
   box.innerHTML=h;
@@ -600,6 +636,122 @@ $("#e-del").addEventListener("click",()=>{
   const b=$("#e-del");
   if(b.textContent==="Borrar"){b.textContent="Toca otra vez para borrar";return}
   const id=editId;$("#dlg").close();if(id){delete draft.items[id];saveDraft();del("productos",id);toast("Producto borrado. Su historial de precios se queda.")}
+});
+
+/* ---------- Escanear ticket ---------- */
+let TK=null;
+function b64(file){return new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(String(r.result).split(",")[1]);r.onerror=()=>rej(new Error("No se pudo leer el archivo."));r.readAsDataURL(file)})}
+function shrink(file){return new Promise((res,rej)=>{
+  const url=URL.createObjectURL(file),img=new Image();
+  img.onload=()=>{const max=2000,k=Math.min(1,max/Math.max(img.width,img.height));const c=document.createElement("canvas");
+    c.width=Math.round(img.width*k);c.height=Math.round(img.height*k);c.getContext("2d").drawImage(img,0,0,c.width,c.height);
+    URL.revokeObjectURL(url);res({type:"image/jpeg",data:c.toDataURL("image/jpeg",0.82).split(",")[1]})};
+  img.onerror=()=>{URL.revokeObjectURL(url);rej(new Error("No se pudo abrir la foto."))};
+  img.src=url;})}
+function scanning(on){const b=$("#scan-btn");b.disabled=on;$("#scan-txt").textContent=on?"Leyendo ticket… (unos segundos)":"Escanear ticket"}
+$("#scan-btn").addEventListener("click",()=>$("#scan-file").click());
+$("#scan-file").addEventListener("change",async ev=>{
+  const fs=[...ev.target.files].slice(0,4);ev.target.value="";
+  if(!fs.length)return;
+  if(!navigator.onLine){toast("Necesitas conexión para leer el ticket.");return}
+  scanning(true);
+  try{
+    const files=[];
+    for(const f of fs){
+      if(f.type==="application/pdf"){if(f.size>3.5e6)throw new Error("El PDF es muy grande (máximo 3,5 MB).");files.push({type:f.type,data:await b64(f)})}
+      else files.push(await shrink(f));
+    }
+    const{data}=await sb.auth.getSession();
+    if(!data.session)throw new Error("Sesión caducada. Vuelve a entrar.");
+    const r=await fetch("/api/ticket",{method:"POST",headers:{"Content-Type":"application/json",Authorization:"Bearer "+data.session.access_token},
+      body:JSON.stringify({files,productos:Object.entries(S.productos).map(([id,p])=>({id,nombre:p.nombre}))})});
+    const j=await r.json().catch(()=>({}));
+    if(!r.ok)throw new Error(j.error||"No se pudo leer el ticket.");
+    if(!j.lineas||!j.lineas.length)throw new Error("No encontré productos. Prueba con más luz y el ticket bien estirado.");
+    openTicket(j);
+  }catch(e){toast(e.message||"Error leyendo el ticket.",6000)}
+  finally{scanning(false)}
+});
+function tkPrecio(l){const p=parseNum(l.precio);return isFinite(p)?p:null}
+function tkImporte(l){const p=tkPrecio(l),q=parseNum(l.cant);return p!=null&&isFinite(q)?Math.round(p*q*100)/100:(l.importe??0)}
+function openTicket(j){
+  TK={fecha:j.fecha,total:j.total,lineas:j.lineas.map(l=>({...l,
+    accion:l.ignorar?"__skip":(l.producto_id&&S.productos[l.producto_id]?l.producto_id:"__new"),
+    precio:l.precio_unitario!=null?String(l.precio_unitario).replace(".",","):(l.importe!=null&&l.cantidad?String(Math.round(l.importe/l.cantidad*100)/100).replace(".",","):""),
+    cant:String(l.cantidad||1).replace(".",",")}))};
+  $("#tk-tienda").value=j.tienda||draft.tienda||"";
+  $("#tk-info").textContent=[j.fecha?`Ticket del ${fF(Date.parse(j.fecha+"T12:00:00"))}`:"",`${j.lineas.length} líneas leídas`,"Corrige lo que haga falta antes de guardar."].filter(Boolean).join(". ")+"";
+  renderTicket();
+  const d=$("#dlg-ticket");if(d.showModal)d.showModal();else d.setAttribute("open","");
+}
+function tkDelta(l){
+  if(l.accion.startsWith("__"))return"";
+  const lp=last(l.accion),p=tkPrecio(l);
+  if(!lp||p==null)return lp?"":`<span class="muted">Primera vez que apuntas su precio.</span>`;
+  const ch=pct(p,lp.p);
+  if(Math.abs(ch)<0.05)return `<span class="muted">Igual que la última vez (${eur.format(lp.p)}).</span>`;
+  return `<span class="${ch>0?"up":"down"}">${ch>0?"▲ Subió":"▼ Bajó"} ${fP(Math.abs(ch))} desde ${eur.format(lp.p)} (${fF(lp.ts)})</span>`;
+}
+function renderTicket(){
+  const prods=Object.entries(S.productos).sort((a,b)=>a[1].nombre.localeCompare(b[1].nombre,"es"));
+  $("#tk-list").innerHTML=TK.lineas.map((l,i)=>`<li class="tk-row ${l.accion==="__skip"?"skip":""}" data-tki="${i}">
+    <div class="tk-top"><span>${esc(l.texto)}</span><b id="tk-imp-${i}">${eur.format(tkImporte(l))}</b></div>
+    <label class="sr" for="tk-a-${i}">Producto</label>
+    <select class="field" id="tk-a-${i}" data-tk="accion" data-i="${i}" data-k="tk-a-${i}">
+      <option value="__new" ${l.accion==="__new"?"selected":""}>➕ Nuevo: ${esc(l.nombre)}</option>
+      <option value="__skip" ${l.accion==="__skip"?"selected":""}>✕ No guardar</option>
+      <optgroup label="Tus productos">${prods.map(([id,p])=>`<option value="${id}" ${l.accion===id?"selected":""}>${esc(p.nombre)}</option>`).join("")}</optgroup>
+    </select>
+    <div class="tk-nums">
+      <label>${l.por_peso?"Kilos":"Cantidad"}<input class="field" inputmode="decimal" data-tk="cant" data-i="${i}" data-k="tk-c-${i}" value="${esc(l.cant)}"></label>
+      <label>${l.por_peso?"€ por kg":"€ cada uno"}<input class="field" inputmode="decimal" data-tk="precio" data-i="${i}" data-k="tk-p-${i}" value="${esc(l.precio)}"></label>
+    </div>
+    <div class="tk-delta" id="tk-d-${i}">${tkDelta(l)}</div>
+  </li>`).join("");
+  tkTotal();
+}
+function tkTotal(){
+  const inc=TK.lineas.filter(l=>l.accion!=="__skip");
+  const t=inc.reduce((s,l)=>s+tkImporte(l),0);
+  $("#tk-tot").innerHTML=`${eur.format(t)}<small>${inc.length} productos${TK.total!=null?`. Ticket: ${eur.format(TK.total)}`:""}</small>`;
+}
+$("#tk-list").addEventListener("input",ev=>{
+  const t=ev.target,i=+t.dataset.i,k=t.dataset.tk;if(!TK||isNaN(i)||!k)return;
+  const l=TK.lineas[i];
+  if(k==="accion"){l.accion=t.value;t.closest(".tk-row").classList.toggle("skip",l.accion==="__skip")}
+  else l[k]=t.value;
+  $("#tk-imp-"+i).textContent=eur.format(tkImporte(l));
+  $("#tk-d-"+i).innerHTML=tkDelta(l);
+  tkTotal();
+});
+$("#tk-cancel").addEventListener("click",()=>{$("#dlg-ticket").close();TK=null});
+$("#tk-save").addEventListener("click",()=>{
+  if(!TK)return;
+  const now=Date.now();
+  let ts=TK.fecha?Date.parse(TK.fecha+"T12:00:00"):NaN;
+  if(!isFinite(ts)||ts>now||ts<now-60*DAY)ts=now;
+  const byId={};
+  for(const l of TK.lineas){
+    if(l.accion==="__skip")continue;
+    const precio=tkPrecio(l),cant=parseNum(l.cant)>0?parseNum(l.cant):1,imp=tkImporte(l);
+    let id=l.accion;
+    if(id==="__new"){
+      const ex=Object.entries(S.productos).find(([,p])=>norm(p.nombre)===norm(l.nombre));
+      if(ex)id=ex[0];
+      else{id=uid();put("productos",id,{nombre:l.nombre,cat:l.categoria||"Otros",estado:"hay",cambio:now,...(precio!=null?{ultimoPrecio:precio}:{})})}
+    }
+    if(!S.productos[id])continue;
+    const nombre=S.productos[id].nombre;
+    if(byId[id]){const a=byId[id];a.cant=Math.round((a.cant+cant)*1000)/1000;a.importe=Math.round((a.importe+imp)*100)/100;if(!l.por_peso&&a.cant>0)a.precio=Math.round(a.importe/a.cant*100)/100}
+    else byId[id]={id,nombre,precio:precio!=null?Math.round(precio*100)/100:null,cant,importe:imp};
+  }
+  const items=Object.values(byId);
+  if(!items.length){toast("No hay ningún producto marcado para guardar.");return}
+  const total=Math.round(items.reduce((s,i)=>s+(i.importe||0),0)*100)/100;
+  put("compras",uid(),{ts,tienda:$("#tk-tienda").value.trim(),items,total});
+  for(const i of items){const p=S.productos[i.id];const np={...p,estado:"hay",cambio:now};if(i.precio!=null)np.ultimoPrecio=i.precio;put("productos",i.id,np);delete draft.items[i.id]}
+  saveDraft();$("#dlg-ticket").close();TK=null;render();
+  toast(`Compra guardada desde el ticket: ${eur.format(total)}, ${items.length} productos.`,5000);
 });
 
 /* ---------- Sesión y arranque ---------- */

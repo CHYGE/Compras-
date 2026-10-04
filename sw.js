@@ -1,5 +1,5 @@
 // Sube el número de versión cada vez que cambies index.html para que los móviles cojan la nueva.
-const CACHE = "mercado-v2";
+const CACHE = "mercado-v3";
 const ASSETS = [
   "./", "./index.html", "./config.js", "./manifest.webmanifest",
   "./icons/icon-192.png", "./icons/icon-512.png", "./icons/apple-touch-icon.png",
