@@ -5,23 +5,65 @@ const SUPABASE_KEY = process.env.SUPABASE_PUBLISHABLE_KEY || "sb_publishable_uRL
 const MODEL = process.env.CLAUDE_MODEL || "claude-sonnet-5-5";
 const CATS = ["Despensa","Nevera","Frutas y verduras","Carnes y pescado","Panadería","Limpieza","Aseo personal","Bebidas","Otros"];
 
-const SYSTEM = `Eres un lector de tickets de supermercado de España. Recibes una o varias fotos (o un PDF) de UN solo ticket y la lista de productos de una casa.
-Devuelve SOLO un objeto JSON válido, sin texto antes ni después y sin \`\`\`:
-{"tienda":"nombre del súper o ''","fecha":"AAAA-MM-DD o null","total":número o null,"lineas":[{"texto":"la línea tal cual sale en el ticket","producto_id":"id de la lista o null","nombre":"nombre corto y claro","categoria":"una de: ${CATS.join(", ")}","cantidad":número,"por_peso":true o false,"precio_unitario":número,"importe":número,"ignorar":true o false}]}
+const SYSTEM = `Eres un lector de tickets de supermercado de España. Recibes una o varias fotos (o un PDF) y la lista de productos de una casa.
+En las imágenes puede haber UN ticket o VARIOS tickets distintos (por ejemplo, varios tickets juntos en una misma foto). Lee TODOS.
+Registra lo leído llamando a la herramienta "registrar_tickets". No escribas nada más.
 Reglas:
-- Una entrada por artículo comprado. No incluyas IVA, subtotales, forma de pago, cambio, datos de tarjeta, puntos ni cabeceras.
-- importe = lo pagado por esa línea con sus descuentos ya aplicados. Si debajo de un artículo hay una línea de descuento o promoción, réstala a ese artículo y no la pongas como línea aparte.
+- Un objeto en "tickets" por cada ticket físico distinto (otra tienda, otra fecha, otra hora, otro número de ticket u otro total = otro ticket). No mezcles líneas de tickets distintos.
+- Si un mismo ticket largo sale repartido en varias fotos que se solapan, es UN solo ticket y no dupliques líneas.
+- Una línea por artículo comprado. No incluyas IVA, subtotales, forma de pago, cambio, datos de tarjeta, puntos ni cabeceras.
+- importe = lo pagado por esa línea con sus descuentos ya aplicados. Si debajo de un artículo hay una línea de descuento o promoción, réstala a ese artículo y no la pongas aparte.
 - Por unidades: cantidad = unidades y precio_unitario = importe / cantidad.
 - Al peso: por_peso = true, cantidad = kilos y precio_unitario = precio por kg.
-- producto_id: el id del producto de la casa que sea claramente el mismo artículo (ej. "LECHE ENT HACEND 6X1L" → el producto "Leche"). Si no hay una coincidencia clara, null. No fuerces coincidencias.
-- nombre: en español, con la primera letra en mayúscula, sin la marca salvo que sea la forma habitual de llamarlo (ej. "Harina PAN"). Si hay producto_id, usa el nombre de ese producto.
+- producto_id: el id del producto de la casa que sea claramente el mismo artículo (ej. "LECHE ENT HACEND 6X1L" → el producto "Leche"). Si no hay coincidencia clara, null. No fuerces coincidencias.
+- nombre: en español, primera letra en mayúscula, sin la marca salvo que sea la forma habitual de llamarlo (ej. "Harina PAN"). Si hay producto_id, usa el nombre de ese producto.
 - Bolsas, envases retornables y similares: ignorar = true. Todo lo demás: ignorar = false.
-- Si el ticket viene en varias fotos que se solapan, no dupliques líneas.
-- Números con punto decimal y sin símbolo de moneda.`;
+- Números como número (no texto) y sin símbolo de moneda.`;
+
+const TOOL = {
+  name: "registrar_tickets",
+  description: "Registra todos los tickets leídos en las imágenes, con sus líneas.",
+  input_schema: {
+    type: "object",
+    properties: {
+      tickets: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            tienda: { type: "string" },
+            fecha: { type: ["string", "null"], description: "AAAA-MM-DD" },
+            total: { type: ["number", "null"] },
+            lineas: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  texto: { type: "string" },
+                  producto_id: { type: ["string", "null"] },
+                  nombre: { type: "string" },
+                  categoria: { type: "string", enum: CATS },
+                  cantidad: { type: "number" },
+                  por_peso: { type: "boolean" },
+                  precio_unitario: { type: ["number", "null"] },
+                  importe: { type: ["number", "null"] },
+                  ignorar: { type: "boolean" }
+                },
+                required: ["texto", "nombre", "cantidad", "importe"]
+              }
+            }
+          },
+          required: ["lineas"]
+        }
+      }
+    },
+    required: ["tickets"]
+  }
+};
 
 const num = (v, d = 2) => {
   if (v == null || v === "") return null;
-  const n = typeof v === "number" ? v : parseFloat(String(v).replace(",", "."));
+  const n = typeof v === "number" ? v : parseFloat(String(v).replace(/[^\d,.\-]/g, "").replace(/\.(?=\d{3}(\D|$))/g, "").replace(",", "."));
   if (!isFinite(n)) return null;
   const k = Math.pow(10, d);
   return Math.round(n * k) / k;
@@ -54,14 +96,14 @@ module.exports = async (req, res) => {
     else if (/^image\/(jpeg|png|webp|gif)$/.test(f.type)) content.push({ type: "image", source: { type: "base64", media_type: f.type, data: f.data } });
   }
   if (!content.length) return res.status(400).json({ error: "No llegó ninguna foto válida." });
-  content.push({ type: "text", text: `Productos de la casa:\n${JSON.stringify(productos)}\n\nLee el ticket y devuelve solo el JSON.` });
+  content.push({ type: "text", text: `Productos de la casa:\n${JSON.stringify(productos)}\n\nLee todos los tickets y regístralos con la herramienta.` });
 
   let j;
   try {
     const r = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: { "content-type": "application/json", "x-api-key": process.env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01" },
-      body: JSON.stringify({ model: MODEL, max_tokens: 4000, system: SYSTEM, messages: [{ role: "user", content }] })
+      body: JSON.stringify({ model: MODEL, max_tokens: 8000, system: SYSTEM, tools: [TOOL], tool_choice: { type: "tool", name: "registrar_tickets" }, messages: [{ role: "user", content }] })
     });
     j = await r.json();
     if (!r.ok) return res.status(502).json({ error: "Claude: " + ((j && j.error && j.error.message) || r.status) });
@@ -69,29 +111,36 @@ module.exports = async (req, res) => {
     return res.status(502).json({ error: "No se pudo conectar con Claude." });
   }
 
-  const text = (j.content || []).filter(b => b.type === "text").map(b => b.text).join("");
-  const clean = text.replace(/```json|```/g, "").trim();
-  let data;
-  try { data = JSON.parse(clean.slice(clean.indexOf("{"), clean.lastIndexOf("}") + 1)); }
-  catch (e) { return res.status(502).json({ error: "No se pudo leer el ticket. Prueba con una foto más nítida." }); }
-
+  let data = null;
+  const tool = (j.content || []).find(b => b.type === "tool_use" && b.name === "registrar_tickets");
+  if (tool && tool.input) data = tool.input;
+  else {
+    const text = (j.content || []).filter(b => b.type === "text").map(b => b.text).join("");
+    const clean = text.replace(/```json|```/g, "").trim();
+    try { data = JSON.parse(clean.slice(clean.indexOf("{"), clean.lastIndexOf("}") + 1)); } catch (e) {}
+    if (!data) {
+      console.error("Respuesta sin formato:", j.stop_reason, text.slice(0, 500));
+      return res.status(502).json({ error: "Claude no devolvió los datos del ticket (" + (j.stop_reason || "sin motivo") + "). Inténtalo otra vez." });
+    }
+  }
   const ids = new Set(productos.map(p => p.id));
-  const lineas = (Array.isArray(data.lineas) ? data.lineas : []).map(l => ({
-    texto: String(l.texto || "").slice(0, 120),
-    producto_id: ids.has(String(l.producto_id)) ? String(l.producto_id) : null,
-    nombre: String(l.nombre || l.texto || "Producto").slice(0, 60),
-    categoria: CATS.includes(l.categoria) ? l.categoria : "Otros",
-    cantidad: num(l.cantidad, 3) || 1,
-    por_peso: !!l.por_peso,
-    precio_unitario: num(l.precio_unitario),
-    importe: num(l.importe),
-    ignorar: !!l.ignorar
-  })).filter(l => l.importe != null || l.precio_unitario != null);
-
-  return res.status(200).json({
-    tienda: String(data.tienda || "").slice(0, 60),
-    fecha: /^\d{4}-\d{2}-\d{2}$/.test(String(data.fecha)) ? data.fecha : null,
-    total: num(data.total),
-    lineas
+  const limpiar = t => ({
+    tienda: String(t.tienda || "").slice(0, 60),
+    fecha: /^\d{4}-\d{2}-\d{2}$/.test(String(t.fecha)) ? t.fecha : null,
+    total: num(t.total),
+    lineas: (Array.isArray(t.lineas) ? t.lineas : []).map(l => ({
+      texto: String(l.texto || "").slice(0, 120),
+      producto_id: ids.has(String(l.producto_id)) ? String(l.producto_id) : null,
+      nombre: String(l.nombre || l.texto || "Producto").slice(0, 60),
+      categoria: CATS.includes(l.categoria) ? l.categoria : "Otros",
+      cantidad: num(l.cantidad, 3) || 1,
+      por_peso: !!l.por_peso,
+      precio_unitario: num(l.precio_unitario),
+      importe: num(l.importe),
+      ignorar: !!l.ignorar
+    })).filter(l => l.importe != null || l.precio_unitario != null)
   });
+  const lista = Array.isArray(data.tickets) ? data.tickets : (Array.isArray(data.lineas) ? [data] : []);
+  const tickets = lista.map(limpiar).filter(t => t.lineas.length);
+  return res.status(200).json({ tickets });
 };
